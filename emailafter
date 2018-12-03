@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+
+if [ $# -eq 0 -o "$1" = "-h" ]; then
+	echo "usage:"
+	echo "emailafter [-p] mail@example.com command [args]"
+	exit
+fi
+
+if [ "$1" = "-p" ]; then
+	shift
+	EMAIL="$1"
+	shift
+	echo "E-Mail Address: $EMAIL"
+	echo "$@"
+	exit
+fi
+
+EMAIL="$1"
+shift
+
+"$@"
+
+echo "The following command has completed: \"$@\"" | mail -s "$(hostname --fqdn): command complete" "$EMAIL"
