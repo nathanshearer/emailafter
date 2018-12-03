@@ -16,6 +16,6 @@ Examples:
   emailafter mail@example.com 7z a /mnt/offsite/storage.7z /mnt/backup/storage
 
 Version:
-  emailafter 1.0.0.0
+  emailafter 1.0.1.0
   Copyright (C) 2018 Nathan Shearer
   Licensed under GNU General Public License 2.0
