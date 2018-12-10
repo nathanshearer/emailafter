@@ -23,7 +23,8 @@ function emailafter_help
 {
 	#     01234567890123456789012345678901234567890123456789012345678901234567890123456789
 	echo "Description:"
-	echo "  Send an email after running a command."
+	echo "  Run a command and send an email with the command, output, and exit status in"
+	echo "  the message body."
 	echo
 	echo "Usage:"
 	echo "  $CODENAME [options] mail@example.com command [args]"
