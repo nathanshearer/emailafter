@@ -4,7 +4,7 @@ NAME="emailafter"
 CODENAME="emailafter"
 COPYRIGHT="Copyright (C) 2018 Nathan Shearer"
 LICENSE="GNU General Public License 2.0"
-VERSION="1.1.0.0"
+VERSION="2.0.0.0"
 
 # \brief Ensures dependencies are present
 # \param $@ The dependencies to check for
@@ -18,27 +18,78 @@ function emailafter_check_dependencies
 	done
 }
 
+# \brief Print the first and last n lines or bytes from $1
+# \param $1 The file to read lines from
+function emailafter_hail
+{
+	local HAIL_BYTES=false
+	local HAIL_LINES=10
+	
+	while [ $# -ne 0 ]; do
+		case "$1" in
+			"-c"|"--bytes")
+				HAIL_BYTES="$2"
+				shift 2
+				;;
+			"-n"|"--lines")
+				HAIL_LINES="$2"
+				shift 2
+				;;
+			*) break;;
+		esac
+	done
+	
+	if [ $# -eq 0 ]; then
+		echo "Usage:"
+		echo "$0 [file]"
+		return 1
+	fi
+	
+	if [ "$HAIL_BYTES" != "false" ]; then
+		if [ $(cat "$1" | wc -c) -gt $(( 2 * $HAIL_BYTES + 3 )) ]; then
+			head -c "$HAIL_BYTES" "$1"
+			echo -n "..."
+			tail -c "$HAIL_BYTES" "$1"
+		else
+			cat "$1"
+		fi
+	else
+		if [ $(cat "$1" | wc -l) -gt $(( 2 * $HAIL_LINES + 1 )) ]; then
+			head -n "$HAIL_LINES" "$1"
+			echo "..."
+			tail -n "$HAIL_LINES" "$1"
+		else
+			cat "$1"
+		fi
+	fi
+}
+
 # \brief Displays the help and exits the program
 function emailafter_help
 {
 	#     01234567890123456789012345678901234567890123456789012345678901234567890123456789
 	echo "Description:"
-	echo "  Run a command and send an email with the command, output, and exit status in"
-	echo "  the message body."
+	echo "  Run a command then send the command, statistics, and output in an e-mail."
 	echo
 	echo "Usage:"
-	echo "  $CODENAME [options] mail@example.com command [args]"
+	echo "  $CODENAME [options] command [args]"
 	echo
 	echo "Options:"
+	echo "  -c, --config $CODENAME.conf"
+	echo "    Load $CODENAME.conf after trying /etc/$CODENAME.conf and ~/.$CODENAME.conf"
+	echo "  -e, --email mail@example.com"
+	echo "    Send the e-mail to mail@example.com"
 	echo "  -h, --help"
 	echo "    Display this help message and exit."
+	echo "  -n, --lines 100"
+	echo "    Send up to the first and last 100 lines of the command output."
 	echo "  -p, --pretend"
 	echo "    Print out the e-mail address and the command that would be executed."
 	echo
 	echo "Examples:"
-	echo "  $CODENAME -p mail@example.com du --apparent-size -b -l -x /mnt/storage"
-	echo "  $CODENAME mail@example.com cp -afv /mnt/storage /mnt/backup"
-	echo "  $CODENAME mail@example.com 7z a /mnt/offsite/storage.7z /mnt/backup/storage"
+	echo "  $CODENAME -p -e mail@example.com du --apparent-size -b -l -x /mnt/storage"
+	echo "  $CODENAME -e mail@example.com cp -afv /mnt/storage /mnt/backup"
+	echo "  $CODENAME -e mail@example.com 7z a /mnt/offsite/storage.7z /mnt/backup/storage"
 	echo
 	echo "Version:"
 	echo "  $NAME $VERSION"
@@ -47,32 +98,77 @@ function emailafter_help
 	exit
 }
 
+function emailafter_pretend
+{
+	echo "E-Mail Address: $EMAIL"
+	echo "Command: ""$@"
+	exit
+}
+
+#------------------------------------------------------------------------------
+# default configuration
+#
+
+EMAIL="mail@example.com"
+LINES=100
+PRETEND=false
+TMP="/tmp"
+
+#------------------------------------------------------------------------------
+# config files
+#
+
+if [ -r /etc/$CODENAME.conf ]; then
+	. /etc/$CODENAME.conf
+fi
+if [ -r ~/.$CODENAME.conf ]; then
+	. ~/.$CODENAME.conf
+fi
+
 #------------------------------------------------------------------------------
 # command line arguments
 #
 
-if [ $# -eq 0 -o "$1" = "-h" -o "$1" = "--help" ]; then
+while true; do
+	case "$1" in
+		"-c"|"--config")
+			. "$2"
+			shift 2
+			;;
+		"-e"|"--email")
+			EMAIL="$2"
+			shift 2
+			;;
+		"-h"|"--help")
+			emailafter_help
+			exit
+			;;
+		"-n"|"--lines")
+			LINES="$2"
+			shift 2
+			;;
+		"-p"|"--pretend")
+			PRETEND=true
+			shift
+			;;
+		*)
+			break
+	esac
+done
+if [ $# -eq 0 ]; then
 	emailafter_help
 fi
-
-if [ "$1" = "-p" -o "$1" = "--pretend" ]; then
-	shift
-	EMAIL="$1"
-	shift
-	echo "E-Mail Address: $EMAIL"
-	echo "$@"
+if $PRETEND; then
+	emailafter_pretend "$@"
 	exit
 fi
-
-EMAIL="$1"
-shift
 
 #------------------------------------------------------------------------------
 # prepare environment
 #
 
 emailafter_check_dependencies hostname mail stdbuf
-TMP="/tmp/$CODENAME.$$"
+TMP="$TMP/$CODENAME.$$"
 mkdir -p "$TMP"
 
 #------------------------------------------------------------------------------
@@ -85,26 +181,30 @@ touch "$TMP"/output.log
 stdbuf -oL -eL tee -a "$TMP"/output.log <"$TMP"/stdout &
 stdbuf -oL -eL tee -a "$TMP"/output.log <"$TMP"/stderr >&2 &
 
+# after all that setup we can finally run the command
+DATE_START=$(date +%s)
 stdbuf -oL -eL "$@" >"$TMP"/stdout 2>"$TMP"/stderr
 STATUS="$?"
+DATE_END=$(date +%s)
 
 HOSTNAME=$(hostname --fqdn)
 PWD=$(pwd)
 USER_ID=$(id -u)
 if [ $(id -u) = 0 ]; then
-	echo -n "$HOSTNAME $PWD # " >"$TMP"/email.txt
+	echo -n "root@$HOSTNAME $PWD # " >"$TMP"/email.txt
 else
 	USER_NAME=$(id -un)
 	echo -n "$USER_NAME@$HOSTNAME $PWD \$ " >"$TMP"/email.txt
 fi
-
 echo "$@" >>"$TMP"/email.txt
-echo >>"$TMP"/email.txt
-cat "$TMP"/output.log >>"$TMP"/email.txt
-echo >>"$TMP"/email.txt
+echo "Date Started: "$(date --iso-8601=seconds --date=@$DATE_START) >>"$TMP"/email.txt
+echo "Date Ended: "$(date --iso-8601=seconds --date=@$DATE_END) >>"$TMP"/email.txt
 echo "Exit Status: $STATUS" >>"$TMP"/email.txt
+echo >>"$TMP"/email.txt
+echo "Command Output:" >>"$TMP"/email.txt
+emailafter_hail -n "$LINES" "$TMP"/output.log >>"$TMP"/email.txt
 
-cat "$TMP"/email.txt | mail -s "$(hostname --fqdn): command complete" "$EMAIL"
+cat "$TMP"/email.txt | mail -s "$(hostname --fqdn): emailafter command" "$EMAIL"
 
 rm -rf "$TMP"
 exit "$STATUS"
